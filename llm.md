@@ -4,6 +4,7 @@
 
 ```bash
 npm install intearwallet-connect
+bun add intearwallet-connect
 ```
 
 ## Import
@@ -11,7 +12,9 @@ npm install intearwallet-connect
 ```typescript
 import IntearWalletConnector, { 
   LocalStorageStorage, 
-  INTEAR_NATIVE_WALLET_URL 
+  INTEAR_NATIVE_WALLET_URL,
+  iframe,
+  base58Encode 
 } from 'intearwallet-connect';
 ```
 
@@ -25,19 +28,17 @@ const connector = await IntearWalletConnector.loadFrom(storage);
 
 ## Connect Wallet
 
-### Simple Sign-In (No Message, No Access Key)
+### Simple Sign-In
 
 ```typescript
 if (!connector.connectedAccount) {
   const result = await connector.requestConnection({
     networkId: 'mainnet',
-    walletUrl: 'iframe:https://wallet.intear.tech'
+    walletUrl: iframe() // or 'https://wallet.intear.tech'
   });
   
   if (result) {
     console.log('Connected account:', result.account.accountId);
-  } else {
-    console.log('User rejected connection');
   }
 }
 ```
@@ -45,12 +46,14 @@ if (!connector.connectedAccount) {
 ### Sign-In with Message (NEP-413)
 
 ```typescript
+const nonce = crypto.getRandomValues(new Uint8Array(32));
+
 const result = await connector.requestConnection({
   networkId: 'mainnet',
-  walletUrl: 'iframe:https://wallet.intear.tech',
+  walletUrl: iframe(),
   messageToSign: {
     message: 'Login to my app',
-    nonce: crypto.getRandomValues(new Uint8Array(32)),
+    nonce,
     recipient: 'your-app.com'
   }
 });
@@ -61,16 +64,29 @@ console.log('Signed message:', result.signedMessage);
 ### Sign-In with Limited Access Key
 
 ```typescript
+// Generate a new keypair for the function call key
+const keyPair = await crypto.subtle.generateKey(
+  { name: "Ed25519" }, 
+  true, 
+  ["sign"]
+);
+const publicKeyRaw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
+const publicKeyBytes = new Uint8Array(publicKeyRaw);
+const publicKey = 'ed25519:' + base58Encode(publicKeyBytes);
+
 const result = await connector.requestConnection({
   networkId: 'mainnet',
-  walletUrl: 'iframe:https://wallet.intear.tech',
+  walletUrl: iframe(),
   functionCallKey: {
-    publicKey: 'ed25519:...', // Your app's public key
+    publicKey,
     contractId: 'your-contract.near',
     methodNames: ['method_one', 'method_two'], // or "any"
-    gasAllowance: '250000000000000000000000000' // 0.25 NEAR in yoctoNEAR
+    gasAllowance: '100000000000000000000000000' // 0.1 NEAR in yoctoNEAR
   }
 });
+
+// Store privateKey securely if you need to sign transactions client-side
+const privateKey = keyPair.privateKey;
 ```
 
 ## Check Connection Status
@@ -87,8 +103,10 @@ if (connector.connectedAccount) {
 ## Send Transactions
 
 ```typescript
+const accountId = connector.connectedAccount.accountId;
+
 const result = await connector.connectedAccount.sendTransactions([{
-  signerId: 'user.near',
+  signerId: accountId,
   receiverId: 'contract.near',
   actions: [{
     type: 'FunctionCall',
@@ -109,7 +127,7 @@ console.log('Transaction outcomes:', result.outcomes);
 ```typescript
 const result = await connector.connectedAccount.sendTransactions([
   {
-    signerId: 'user.near',
+    signerId: accountId,
     receiverId: 'contract1.near',
     actions: [{
       type: 'FunctionCall',
@@ -117,7 +135,7 @@ const result = await connector.connectedAccount.sendTransactions([
     }]
   },
   {
-    signerId: 'user.near',
+    signerId: accountId,
     receiverId: 'contract2.near',
     actions: [{
       type: 'Transfer',
@@ -130,9 +148,11 @@ const result = await connector.connectedAccount.sendTransactions([
 ## Sign Message (After Connection)
 
 ```typescript
+const nonce = crypto.getRandomValues(new Uint8Array(32));
+
 const signedMessage = await connector.connectedAccount.signMessage({
   message: 'Verify ownership',
-  nonce: crypto.getRandomValues(new Uint8Array(32)),
+  nonce,
   recipient: 'your-app.com'
 });
 
@@ -187,8 +207,9 @@ await connector.disconnect();
 ## Wallet Options
 
 ```typescript
-// Web popup via iframe selector (recommended)
-walletUrl: 'iframe:https://wallet.intear.tech'
+// Iframe selector (recommended)
+walletUrl: iframe()
+walletUrl: iframe('https://wallet.intear.tech')
 
 // Direct web popup
 walletUrl: 'https://wallet.intear.tech'
@@ -203,4 +224,5 @@ walletUrl: INTEAR_NATIVE_WALLET_URL // "intear://"
 - **Gas**: Specified in gas units (1 TGas = 1,000,000,000,000)
 - **Deposit**: Specified in yoctoNEAR (1 NEAR = 10²⁴ yoctoNEAR)
 - **Args**: Pass as JavaScript object, library handles serialization
-- **All connection options are optional** - simple sign-in requires only `networkId`
+- **Connection options**: All optional except `networkId` defaults to `'mainnet'`
+- **Function call key**: Generate the keypair with Web Crypto API, pass only the public key to `requestConnection`
