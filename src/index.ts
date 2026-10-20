@@ -212,7 +212,6 @@ async function openPopupFlow<TResponse>(config: WalletFlowConfig<TResponse>): Pr
         };
 
         const messageHandler = async (event: MessageEvent) => {
-            console.log(__NEARCONNECT__, event.origin, config.walletUrl);
             if (!__NEARCONNECT__ && event.origin !== config.walletUrl) {
                 return;
             }
@@ -816,7 +815,7 @@ export class IntearWalletConnector {
         const publicKeyBase58 = base58Encode(publicKeyBytes);
         const publicKey = `ed25519:${publicKeyBase58}`;
 
-        let messagePayload: { messageToSign?: string };
+        let messagePayload: { messageToSign?: string, functionCallPublicKey?: string } = {};
         if (nep413MessageToSign) {
             const nep413Payload = JSON.stringify({
                 message: nep413MessageToSign.message,
@@ -825,9 +824,10 @@ export class IntearWalletConnector {
                 callback_url: nep413MessageToSign.callbackUrl ?? null,
                 state: nep413MessageToSign.state ?? null
             });
-            messagePayload = { messageToSign: nep413Payload };
-        } else {
-            messagePayload = {};
+            messagePayload.messageToSign = nep413Payload;
+        }
+        if (functionCallKey) {
+            messagePayload.functionCallPublicKey = functionCallKey.publicKey;
         }
         const message = JSON.stringify(messagePayload);
 
@@ -941,20 +941,9 @@ export class IntearWalletConnector {
 
                     switch (event.data.type) {
                         case "ready":
-                            const data = __NEARCONNECT__
-                                ? {
-                                    publicKey,
-                                    networkId,
-                                    nonce,
-                                    message,
-                                    signature,
-                                    version: "V3",
-                                    relayerId,
-                                }
-                                : signInData;
                             iframe.contentWindow?.postMessage({
                                 type: "signIn",
-                                data,
+                                data: signInData,
                             }, "*");
                             break;
                         case "connected":
